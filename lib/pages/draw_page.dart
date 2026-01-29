@@ -8,7 +8,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../models/drawing_models.dart'; //  ActiveTool sẽ được lấy từ đây
+import '../models/drawing_models.dart';
 import '../painters/canvas_painters.dart';
 import '../utils/export_helper.dart';
 import '../utils/storage_helper.dart';
@@ -18,8 +18,6 @@ import '../widgets/drawing_toolbar.dart';
 import '../widgets/drawing_sidebar.dart';
 import '../widgets/drawing_layers_sidebar.dart';
 import 'gallery_page.dart';
-
-//
 
 class DrawPage extends StatefulWidget {
   final String drawingId;
@@ -47,7 +45,7 @@ class _DrawPageState extends State<DrawPage> {
   // --- CẤU HÌNH ---
   final double gridSize = 50.0;
   final Color gridColor = Colors.black.withOpacity(0.05);
-  Color canvasColor = Colors.white;
+  Color canvasColor = Colors.white; // Màu nền mặc định
 
   // --- TRẠNG THÁI ---
   List<Offset> currentPoints = [];
@@ -104,7 +102,6 @@ class _DrawPageState extends State<DrawPage> {
   Future<void> _loadData() async {
     try {
       final name = await StorageHelper.getDrawingName(widget.drawingId);
-      // Tạm thời chỉ load nét vẽ stroke cũ vào layer đầu tiên để test
       final savedStrokes = await StorageHelper.loadDrawing(widget.drawingId);
 
       if (mounted) {
@@ -122,7 +119,7 @@ class _DrawPageState extends State<DrawPage> {
     }
   }
 
-  //  HÀM CHỌN ẢNH
+  // --- XỬ LÝ ẢNH ---
   Future<void> _pickImage() async {
     final picker = ImagePicker();
     try {
@@ -136,7 +133,6 @@ class _DrawPageState extends State<DrawPage> {
         final ui.FrameInfo frameInfo = await codec.getNextFrame();
         final ui.Image img = frameInfo.image;
 
-        // Tính toán vị trí đặt ảnh vào giữa màn hình
         final Matrix4 transform = controller.value;
         final double scale = transform.getMaxScaleOnAxis();
         final Size screenSize = MediaQuery.of(context).size;
@@ -197,7 +193,6 @@ class _DrawPageState extends State<DrawPage> {
     });
   }
 
-  // Lấy strokes và images từ các layer đang hiện
   List<Stroke> get _visibleStrokes {
     return layers.where((layer) => layer.isVisible).expand((layer) => layer.strokes).toList();
   }
@@ -295,7 +290,7 @@ class _DrawPageState extends State<DrawPage> {
     }
   }
 
-  // --- HỘP THOẠI ĐỔI TÊN ---
+  // --- UI DIALOGS ---
   void _showRenameDialog() {
     TextEditingController nameController = TextEditingController(text: currentName);
     showDialog(
@@ -326,7 +321,6 @@ class _DrawPageState extends State<DrawPage> {
     StorageHelper.renameDrawing(widget.drawingId, newName);
   }
 
-  // --- UI HELPERS ---
   void _openSettings() {
     DrawingSettingsModal.show(context, currentGridType: currentGridType, onGridTypeChanged: (type) => setState(() => currentGridType = type), onPickBgColor: _showBackgroundColorPicker);
   }
@@ -337,7 +331,7 @@ class _DrawPageState extends State<DrawPage> {
     showDialog(context: context, barrierColor: Colors.transparent, builder: (ctx) => ProcreateColorPicker(currentColor: currentColor, onColorChanged: (c) => setState(() { currentColor = c; if(activeTool==ActiveTool.eraser) activeTool=ActiveTool.brush; })));
   }
 
-  // EXPORT (Gồm cả ảnh)
+  // --- SAVE & EXPORT ---
   Future<void> _handleExport() async {
     await ExportHelper.exportDrawing(
       context: context,
@@ -349,7 +343,6 @@ class _DrawPageState extends State<DrawPage> {
     );
   }
 
-  //  SAVE (Lưu thumbnail nhỏ)
   Future<void> _saveDrawing() async {
     if (isSaving) return;
     setState(() => isSaving = true);
@@ -367,7 +360,6 @@ class _DrawPageState extends State<DrawPage> {
     if (strokes.isEmpty) return Uint8List(0);
     double minX = double.infinity, minY = double.infinity, maxX = double.negativeInfinity, maxY = double.negativeInfinity;
 
-    // Tính khung bao quanh
     for (var stroke in strokes) {
       for (var p in stroke.points) {
         if (p.dx < minX) minX = p.dx; if (p.dy < minY) minY = p.dy;
@@ -382,14 +374,24 @@ class _DrawPageState extends State<DrawPage> {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, thumbSize, thumbSize));
 
-    canvas.drawRect(const Rect.fromLTWH(0, 0, thumbSize, thumbSize), Paint()..color = Colors.white);
+    // Vẽ nền thumbnail (nên dùng màu nền hiện tại)
+    canvas.drawRect(const Rect.fromLTWH(0, 0, thumbSize, thumbSize), Paint()..color = canvasColor);
 
     double scale = thumbSize / (w > h ? w : h);
     canvas.scale(scale); canvas.translate(-minX, -minY);
 
     final paint = Paint()..strokeCap = StrokeCap.round..strokeJoin = StrokeJoin.round..style = PaintingStyle.stroke;
     for (var stroke in strokes) {
-      paint.color = stroke.color; paint.strokeWidth = stroke.width;
+      // Logic vẽ lại cho thumbnail cũng phải xử lý tẩy
+      if (stroke.isEraser) {
+        paint.color = canvasColor;
+        paint.blendMode = BlendMode.srcOver;
+      } else {
+        paint.color = stroke.color;
+        paint.blendMode = BlendMode.srcOver;
+      }
+      paint.strokeWidth = stroke.width;
+
       if (stroke.points.length > 1) {
         Path path = Path(); path.moveTo(stroke.points[0].dx, stroke.points[0].dy);
         for (int i = 1; i < stroke.points.length; i++) path.lineTo(stroke.points[i].dx, stroke.points[i].dy);
@@ -441,13 +443,23 @@ class _DrawPageState extends State<DrawPage> {
                         children: [
                           Positioned.fill(child: Stack(children: [Container(key: ValueKey(canvasColor), color: canvasColor), RepaintBoundary(child: AnimatedBuilder(animation: controller, builder: (c, _) => CustomPaint(painter: GridPainter(gridSize: gridSize, gridColor: gridColor, controller: controller, gridType: currentGridType))))])),
 
-                          //  VẼ ẢNH + NÉT
+                          //  VẼ ẢNH + NÉT (ĐÃ FIX: Truyền canvasColor để tẩy hoạt động đúng)
                           Positioned.fill(child: RepaintBoundary(child: CustomPaint(
                               isComplex: false,
-                              foregroundPainter: DrawPainter(_visibleStrokes, _visibleImages)
+                              foregroundPainter: DrawPainter(
+                                _visibleStrokes,
+                                _visibleImages,
+                                canvasColor: canvasColor, //  : Truyền màu nền vào đây!
+                              )
                           ))),
 
-                          Positioned.fill(child: CustomPaint(foregroundPainter: DrawPainter(currentStroke == null ? [] : [currentStroke!], [], canvasColor: canvasColor, isPreview: true))),
+                          // Nét vẽ hiện tại (Realtime)
+                          Positioned.fill(child: CustomPaint(foregroundPainter: DrawPainter(
+                              currentStroke == null ? [] : [currentStroke!],
+                              [],
+                              canvasColor: canvasColor, // Truyền vào đây nữa
+                              isPreview: true
+                          ))),
                         ],
                       ),
                     ),
@@ -457,36 +469,12 @@ class _DrawPageState extends State<DrawPage> {
             ),
 
             // 2. TOP BAR
-            // 2. TOP BAR
             Positioned(
               top: 0, left: 0, right: 0,
               child: DrawingToolbar(
                 onBack: _handleBack,
-
-                // 🔥 NÚT SAVE: Gọi hàm Export ra ảnh
                 onSave: _handleExport,
-
-                // 🔥 NÚT IMPORT: Gọi hàm chọn ảnh
                 onImport: _pickImage,
-
-                onSettingsSelect: _openSettings,
-                zoomLevel: "${(currentScale * 100).round()}%",
-                drawingName: currentName,
-                onRename: _showRenameDialog,
-              ),
-            ),
-            // 2. TOP BAR
-            Positioned(
-              top: 0, left: 0, right: 0,
-              child: DrawingToolbar(
-                onBack: _handleBack,
-
-                // NÚT SAVE: Gọi hàm Export ra ảnh
-                onSave: _handleExport,
-
-                //  NÚT IMPORT: Gọi hàm chọn ảnh
-                onImport: _pickImage,
-
                 onSettingsSelect: _openSettings,
                 zoomLevel: "${(currentScale * 100).round()}%",
                 drawingName: currentName,

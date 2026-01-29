@@ -34,7 +34,7 @@ class DrawPainter extends CustomPainter {
         canvas: canvas,
         rect: dstRect,
         image: img.image,
-        filterQuality: FilterQuality.medium,
+        filterQuality: FilterQuality.medium, // Medium để mượt mà cân bằng hiệu năng
         fit: BoxFit.fill,
       );
     }
@@ -48,7 +48,8 @@ class DrawPainter extends CustomPainter {
         ..style = PaintingStyle.stroke;
 
       if (stroke.isEraser) {
-        //  LOGIC TẨY AN TOÀN: Tô đè màu nền
+        // LOGIC TẨY AN TOÀN: Tô đè màu nền (mặc định trắng)
+        // Cách này không dùng saveLayer nên cực nhẹ, không bao giờ crash
         paint.color = canvasColor ?? Colors.white;
         paint.blendMode = BlendMode.srcOver;
       } else {
@@ -64,13 +65,14 @@ class DrawPainter extends CustomPainter {
         continue;
       }
 
-      // Vẽ đường cong mượt
+      // Vẽ đường cong mượt (Bezier Curve)
       final path = Path();
       path.moveTo(stroke.points[0].dx, stroke.points[0].dy);
 
       for (int i = 0; i < stroke.points.length - 1; i++) {
         final p0 = stroke.points[i];
         final p1 = stroke.points[i + 1];
+        // Tính điểm giữa để uốn cong
         final mid = Offset((p0.dx + p1.dx) / 2, (p0.dy + p1.dy) / 2);
 
         if (i == 0) {
@@ -89,7 +91,7 @@ class DrawPainter extends CustomPainter {
   bool shouldRepaint(covariant DrawPainter oldDelegate) => true;
 }
 
-// 3. Class vẽ lưới (GridPainter) - Đã được khôi phục
+// 3. Class vẽ lưới (GridPainter) - Đã sửa lỗi lưới trôi
 class GridPainter extends CustomPainter {
   final double gridSize;
   final Color gridColor;
@@ -109,42 +111,46 @@ class GridPainter extends CustomPainter {
 
     final paint = Paint()
       ..color = gridColor
-      ..strokeWidth = 0.5
+      ..strokeWidth = 0.5 // Nét mảnh cho tinh tế
       ..style = PaintingStyle.stroke;
 
-    // Lấy thông tin Zoom/Pan
+    // Lấy thông tin Zoom/Pan từ Controller
     final Matrix4 matrix = controller.value;
     final double scale = matrix.getMaxScaleOnAxis();
     final translationVector = matrix.getTranslation();
 
-    // Tính vùng nhìn thấy (Viewport)
-    final Rect viewport = Rect.fromLTWH(
-      -translationVector.x / scale,
-      -translationVector.y / scale,
-      size.width / scale,
-      size.height / scale,
-    );
+    // TÍNH TOÁN TOẠ ĐỘ THỰC TẾ (World Coordinates)
+    // Thay vì vẽ dựa trên màn hình, ta tính toạ độ gốc của vùng đang nhìn thấy
 
-    final Rect drawBounds = viewport.inflate(gridSize);
+    final double left = -translationVector.x / scale;
+    final double top = -translationVector.y / scale;
+    final double right = (size.width - translationVector.x) / scale;
+    final double bottom = (size.height - translationVector.y) / scale;
 
-    final double startX = (drawBounds.left / gridSize).floor() * gridSize;
-    final double endX = (drawBounds.right / gridSize).ceil() * gridSize;
-    final double startY = (drawBounds.top / gridSize).floor() * gridSize;
-    final double endY = (drawBounds.bottom / gridSize).ceil() * gridSize;
+    // Làm tròn vùng vẽ để lưới "dính" vào toạ độ chẵn (Snap to grid)
+    final double startX = (left / gridSize).floor() * gridSize;
+    final double endX = (right / gridSize).ceil() * gridSize;
+    final double startY = (top / gridSize).floor() * gridSize;
+    final double endY = (bottom / gridSize).ceil() * gridSize;
 
     if (gridType == GridType.lines) {
+      // Vẽ đường dọc
       for (double x = startX; x <= endX; x += gridSize) {
-        canvas.drawLine(Offset(x, startY), Offset(x, endY), paint);
+        // Vẽ từ top đến bottom thực tế, không dùng startY/endY cục bộ
+        canvas.drawLine(Offset(x, top), Offset(x, bottom), paint);
       }
+      // Vẽ đường ngang
       for (double y = startY; y <= endY; y += gridSize) {
-        canvas.drawLine(Offset(startX, y), Offset(endX, y), paint);
+        //  Vẽ từ left đến right thực tế
+        canvas.drawLine(Offset(left, y), Offset(right, y), paint);
       }
     } else if (gridType == GridType.dots) {
       final dotPaint = Paint()
         ..color = gridColor
         ..style = PaintingStyle.fill;
 
-      final double dotRadius = 1.5 / scale.clamp(0.5, 2.0);
+      // Chấm tròn nhỏ, kích thước không đổi quá nhiều khi zoom
+      final double dotRadius = 1.5;
 
       for (double x = startX; x <= endX; x += gridSize) {
         for (double y = startY; y <= endY; y += gridSize) {
