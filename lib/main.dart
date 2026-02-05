@@ -10,7 +10,7 @@ void main() async {
   // 1. Đảm bảo Flutter Binding được khởi tạo trước
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 2. 🔥 Khởi tạo Firebase (QUAN TRỌNG)
+  // 2.  Khởi tạo Firebase (QUAN TRỌNG)
   // Nếu chưa có file google-services.json, bước này sẽ gây Crash
   try {
     await Firebase.initializeApp();

@@ -10,11 +10,7 @@ class AuthPage extends StatefulWidget {
 }
 
 class _AuthPageState extends State<AuthPage> {
-  // Biến này quyết định đang ở màn hình nào
-  // true: Đăng Nhập
-  // false: Đăng Ký
   bool isLogin = true;
-
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
@@ -22,7 +18,77 @@ class _AuthPageState extends State<AuthPage> {
   String? errorMessage;
   bool isLoading = false;
 
-  // Hàm xử lý khi bấm nút Submit
+  // 🔥 HÀM XỬ LÝ QUÊN MẬT KHẨU (Mới)
+  Future<void> _forgotPassword() async {
+    final resetEmailController = TextEditingController(text: _emailController.text);
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF2C2C2C), // Màu nền tối cho hợp theme
+        title: const Text("Đặt lại mật khẩu", style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Nhập email của bạn, chúng tôi sẽ gửi đường dẫn đặt lại mật khẩu.",
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: resetEmailController,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: "Email",
+                labelStyle: const TextStyle(color: Colors.white54),
+                filled: true,
+                fillColor: Colors.white10,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Hủy", style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () async {
+              final email = resetEmailController.text.trim();
+              if (email.isEmpty) return;
+
+              try {
+                // Gửi email reset từ Firebase
+                await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+                if (mounted) {
+                  Navigator.pop(context); // Đóng hộp thoại
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Đã gửi email! Hãy kiểm tra hòm thư của bạn."),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } on FirebaseAuthException catch (e) {
+                // Xử lý lỗi nếu email không tồn tại
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text("Lỗi: ${e.message}"),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+            child: const Text("Gửi", style: TextStyle(color: Color(0xFF32C5FF), fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _submit() async {
     setState(() {
       isLoading = true;
@@ -31,39 +97,27 @@ class _AuthPageState extends State<AuthPage> {
 
     try {
       if (isLogin) {
-        // --- LOGIC ĐĂNG NHẬP (Giữ nguyên) ---
         await AuthService().signIn(
           email: _emailController.text.trim(),
           password: _passwordController.text.trim(),
         );
       } else {
-        // --- LOGIC ĐĂNG KÝ (Đã sửa) ---
-
-        // 1. Kiểm tra mật khẩu khớp nhau
         if (_passwordController.text != _confirmController.text) {
           throw FirebaseAuthException(code: 'password-mismatch', message: "Mật khẩu xác nhận không khớp");
         }
-
-        // 2. Tạo tài khoản
         await AuthService().signUp(
           email: _emailController.text.trim(),
           password: _passwordController.text.trim(),
         );
-
-        // 🔥 3. QUAN TRỌNG: Đăng xuất ngay lập tức!
-        // Việc này ngăn không cho StreamBuilder ở main.dart tự chuyển sang GalleryPage
         await FirebaseAuth.instance.signOut();
 
-        // 4. Chuyển giao diện về Đăng nhập & Thông báo thành công
         if (mounted) {
           setState(() {
-            isLogin = true; // Chuyển về màn hình Đăng nhập
+            isLogin = true;
             errorMessage = null;
-            _passwordController.clear(); // Xóa pass cũ
+            _passwordController.clear();
             _confirmController.clear();
           });
-
-          // Hiện thông báo màu xanh
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text("Đăng ký thành công! Vui lòng đăng nhập."),
@@ -75,7 +129,6 @@ class _AuthPageState extends State<AuthPage> {
         }
       }
     } on FirebaseAuthException catch (e) {
-      // Xử lý lỗi từ Firebase
       String msg = "Đã có lỗi xảy ra";
       if (e.code == 'user-not-found') msg = "Không tìm thấy tài khoản này.";
       else if (e.code == 'wrong-password') msg = "Sai mật khẩu.";
@@ -95,14 +148,13 @@ class _AuthPageState extends State<AuthPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF121212), // Nền tối
+      backgroundColor: const Color(0xFF121212),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // 1. ICON VÀ TIÊU ĐỀ
               Icon(
                   isLogin ? Icons.lock_open_rounded : Icons.person_add_rounded,
                   size: 80,
@@ -120,23 +172,34 @@ class _AuthPageState extends State<AuthPage> {
               ),
               const SizedBox(height: 40),
 
-              // 2. FORM NHẬP LIỆU
               _buildTextField(_emailController, "Email", Icons.email_outlined),
               const SizedBox(height: 16),
               _buildTextField(_passwordController, "Mật khẩu", Icons.lock_outline, isObscure: true),
 
-              // Chỉ hiện ô Nhập lại mật khẩu khi Đăng Ký
               if (!isLogin) ...[
                 const SizedBox(height: 16),
                 _buildTextField(_confirmController, "Nhập lại mật khẩu", Icons.lock_reset, isObscure: true),
               ],
 
-              const SizedBox(height: 12),
+              // 🔥 NÚT QUÊN MẬT KHẨU (Chỉ hiện khi Đăng Nhập)
+              if (isLogin)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _forgotPassword,
+                    child: const Text(
+                        "Quên mật khẩu?",
+                        style: TextStyle(color: Color(0xFF32C5FF), fontWeight: FontWeight.bold)
+                    ),
+                  ),
+                )
+              else
+                const SizedBox(height: 20), // Khoảng cách bù khi không có nút quên pass
 
-              // 3. HIỂN THỊ LỖI
               if (errorMessage != null)
                 Container(
                   padding: const EdgeInsets.all(10),
+                  margin: const EdgeInsets.only(bottom: 20),
                   decoration: BoxDecoration(color: Colors.red.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
                   child: Row(
                     children: [
@@ -147,9 +210,6 @@ class _AuthPageState extends State<AuthPage> {
                   ),
                 ),
 
-              const SizedBox(height: 24),
-
-              // 4. NÚT SUBMIT
               SizedBox(
                 width: double.infinity,
                 height: 50,
@@ -171,7 +231,6 @@ class _AuthPageState extends State<AuthPage> {
 
               const SizedBox(height: 20),
 
-              // 5. NÚT CHUYỂN ĐỔI (TOGGLE)
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -182,9 +241,9 @@ class _AuthPageState extends State<AuthPage> {
                   TextButton(
                     onPressed: () {
                       setState(() {
-                        isLogin = !isLogin; // Đảo ngược trạng thái
-                        errorMessage = null; // Xóa lỗi cũ
-                        _confirmController.clear(); // Xóa mật khẩu cũ
+                        isLogin = !isLogin;
+                        errorMessage = null;
+                        _confirmController.clear();
                         _passwordController.clear();
                       });
                     },
@@ -202,7 +261,6 @@ class _AuthPageState extends State<AuthPage> {
     );
   }
 
-  // Widget con để vẽ ô nhập liệu
   Widget _buildTextField(TextEditingController controller, String label, IconData icon, {bool isObscure = false}) {
     return TextField(
       controller: controller,
