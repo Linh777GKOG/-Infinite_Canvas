@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:firebase_core/firebase_core.dart'; // 🔥 Import Firebase Core
-import 'package:firebase_auth/firebase_auth.dart'; // 🔥 Import Firebase Auth
+import 'package:firebase_core/firebase_core.dart'; //  Import Firebase Core
+import 'package:firebase_auth/firebase_auth.dart'; //  Import Firebase Auth
 
 import 'pages/gallery_page.dart';
-import 'pages/auth_page.dart'; // 🔥 Import trang Auth mới tạo
+import 'pages/auth_page.dart'; //  Import trang Auth mới tạo
 
 void main() async {
   // 1. Đảm bảo Flutter Binding được khởi tạo trước
