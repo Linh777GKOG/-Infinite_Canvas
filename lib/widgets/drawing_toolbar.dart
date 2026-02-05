@@ -59,7 +59,7 @@ class DrawingToolbar extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    _buildIcon(Icons.layers_outlined, onTap: onSettingsSelect, size: 20),
+                    _buildIcon(Icons.settings, onTap: onSettingsSelect, size: 20),
                   ],
                 ),
               ),

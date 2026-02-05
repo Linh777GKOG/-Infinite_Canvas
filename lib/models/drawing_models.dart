@@ -1,20 +1,27 @@
-import 'dart:ui' as ui;       //   dùng ui.Image
-import 'dart:typed_data';     //  Uint8List (cho thumbnail)
+import 'dart:ui' as ui;       // dùng ui.Image
+import 'dart:typed_data';     // Uint8List (cho thumbnail)
 import 'dart:convert';
-import 'package:flutter/material.dart'; //   dùng Color, Offset
-enum ActiveTool { brush, eraser, hand, image, text }
-// 1. CLASS NÉT VẼ
-class Stroke {
-  final List<Offset> points;
-  final Color color;
-  final double width;
-  final bool isEraser;
+import 'package:flutter/material.dart'; // dùng Color, Offset
+import 'package:uuid/uuid.dart'; // 🔥 Package tạo ID duy nhất
 
-  Stroke(this.points, this.color, this.width, {this.isEraser = false});
+// 1. Enum Công cụ (Đã thêm 'lasso')
+enum ActiveTool { brush, eraser, hand, image, text, lasso }
+
+// 2. CLASS NÉT VẼ (Stroke) - Đã thêm ID và sửa lỗi vị trí hàm
+class Stroke {
+  final String id; // <--- Đã thêm ID
+  List<Offset> points;
+  Color color;
+  double width;
+  bool isEraser;
+
+  Stroke(this.points, this.color, this.width, {this.isEraser = false, String? id})
+      : id = id ?? const Uuid().v4(); // Tự động tạo ID nếu không có
 
   // Chuyển sang JSON để lưu
   Map<String, dynamic> toJson() {
     return {
+      'id': id, // Lưu ID
       'points': points.map((p) => {'dx': p.dx, 'dy': p.dy}).toList(),
       'color': color.value,
       'width': width,
@@ -33,11 +40,12 @@ class Stroke {
       Color(json['color']),
       json['width'],
       isEraser: json['isEraser'] ?? false,
+      id: json['id'], // Load lại ID cũ
     );
   }
 }
 
-// 2. CLASS ẢNH CHÈN VÀO (Nếu sau này dùng)
+// 3. CLASS ẢNH CHÈN VÀO (Runtime - dùng khi chạy app)
 class ImportedImage {
   final String id;
   final ui.Image image;
@@ -56,7 +64,7 @@ class ImportedImage {
   });
 }
 
-// 2b. TEXT CHÈN VÀO CANVAS
+// 4. TEXT CHÈN VÀO CANVAS
 class CanvasText {
   final String id;
   String text;
@@ -138,6 +146,7 @@ class CanvasText {
   }
 }
 
+// 5. CLASS ẢNH ĐỂ LƯU TRỮ (Persisted - dùng khi lưu file)
 class ImportedImagePersisted {
   final String id;
   final Offset position;
@@ -187,9 +196,9 @@ class ImportedImagePersisted {
   }
 
   factory ImportedImagePersisted.fromJson(
-    Map<String, dynamic> json, {
-    required bool webInlineImages,
-  }) {
+      Map<String, dynamic> json, {
+        required bool webInlineImages,
+      }) {
     final pos = json['position'] as Map<String, dynamic>;
     Uint8List? bytes;
     if (webInlineImages) {
@@ -211,6 +220,7 @@ class ImportedImagePersisted {
   }
 }
 
+// 6. CLASS FILE TÀI LIỆU (DRAWING DOCUMENT)
 class DrawingDocument {
   final int version;
   final List<Stroke> strokes;
@@ -247,9 +257,9 @@ class DrawingDocument {
   }
 
   factory DrawingDocument.fromJson(
-    Map<String, dynamic> json, {
-    required bool webInlineImages,
-  }) {
+      Map<String, dynamic> json, {
+        required bool webInlineImages,
+      }) {
     final strokesList = (json['strokes'] as List<dynamic>? ?? const [])
         .map((e) => Stroke.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -258,9 +268,9 @@ class DrawingDocument {
         .toList();
     final imagesList = (json['images'] as List<dynamic>? ?? const [])
         .map((e) => ImportedImagePersisted.fromJson(
-              e as Map<String, dynamic>,
-              webInlineImages: webInlineImages,
-            ))
+      e as Map<String, dynamic>,
+      webInlineImages: webInlineImages,
+    ))
         .toList();
     return DrawingDocument(
       version: (json['version'] as num?)?.toInt() ?? 2,
@@ -271,7 +281,7 @@ class DrawingDocument {
   }
 }
 
-// 3. CLASS LAYER (LỚP VẼ)
+// 7. CLASS LAYER (LỚP VẼ)
 class DrawingLayer {
   String id;
   List<Stroke> strokes;
@@ -282,9 +292,26 @@ class DrawingLayer {
     required this.strokes,
     this.isVisible = true,
   });
+
+  // Có thể thêm toJson/fromJson nếu cần lưu trạng thái layer sau này
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'strokes': strokes.map((s) => s.toJson()).toList(),
+      'isVisible': isVisible,
+    };
+  }
+
+  factory DrawingLayer.fromJson(Map<String, dynamic> json) {
+    return DrawingLayer(
+      id: json['id'],
+      strokes: (json['strokes'] as List).map((s) => Stroke.fromJson(s)).toList(),
+      isVisible: json['isVisible'] ?? true,
+    );
+  }
 }
 
-// 4. CLASS THÔNG TIN TRANH (HIỆN NGOÀI SẢNH)
+// 8. CLASS THÔNG TIN TRANH (HIỆN NGOÀI SẢNH)
 class DrawingInfo {
   final String id;
   String name;

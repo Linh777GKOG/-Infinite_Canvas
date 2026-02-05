@@ -1,22 +1,22 @@
 import 'package:flutter/material.dart';
-import '../models/drawing_models.dart'; // Nhớ import file model
 
-class DrawingSidebar extends StatelessWidget {
+class DrawingSidebar extends StatefulWidget {
   final double currentWidth;
   final double currentOpacity;
   final Color currentColor;
-  final ValueChanged<double> onWidthChanged;
-  final ValueChanged<double> onOpacityChanged;
+  final Function(double) onWidthChanged;
+  final Function(double) onOpacityChanged;
   final VoidCallback onUndo;
   final VoidCallback onRedo;
   final VoidCallback onColorTap;
 
-  //  Nhận vào trạng thái công cụ và 2 hàm chọn riêng
-  final ActiveTool activeTool;
+  // Các công cụ
+  final dynamic activeTool;
   final VoidCallback onSelectBrush;
   final VoidCallback onSelectEraser;
   final VoidCallback onSelectHand;
   final VoidCallback onSelectText;
+  final VoidCallback? onSelectLasso;
 
   const DrawingSidebar({
     super.key,
@@ -28,181 +28,248 @@ class DrawingSidebar extends StatelessWidget {
     required this.onUndo,
     required this.onRedo,
     required this.onColorTap,
-    required this.activeTool,      // Mới
-    required this.onSelectBrush,   // Mới
-    required this.onSelectEraser,  // Mới
+    required this.activeTool,
+    required this.onSelectBrush,
+    required this.onSelectEraser,
     required this.onSelectHand,
     required this.onSelectText,
+    this.onSelectLasso,
   });
 
   @override
-  Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-
-    return Container(
-      width: 48,
-      constraints: BoxConstraints(maxHeight: screenHeight * 0.85),
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 20, offset: const Offset(4, 4))
-          ]
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 1. MÀU SẮC
-            GestureDetector(
-              onTap: onColorTap,
-              child: Container(
-                padding: const EdgeInsets.all(2),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.grey.shade200, width: 1),
-                ),
-                child: Container(
-                  width: 28, height: 28,
-                  decoration: BoxDecoration(
-                    color: currentColor,
-                    shape: BoxShape.circle,
-                    boxShadow: [BoxShadow(color: currentColor.withOpacity(0.4), blurRadius: 4)],
-                  ),
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 12),
-            const Divider(indent: 10, endIndent: 10, height: 1),
-            const SizedBox(height: 12),
-
-            // 2. CÔNG CỤ: BÚT (BRUSH)
-            _buildToolBtn(
-                icon: Icons.brush_rounded,
-                isActive: activeTool == ActiveTool.brush,
-                onTap: onSelectBrush
-            ),
-
-            const SizedBox(height: 8),
-
-            // 3. CÔNG CỤ: TẨY (ERASER)
-            _buildToolBtn(
-                icon: Icons.cleaning_services_rounded, // Hoặc Icons.edit_off_rounded
-                isActive: activeTool == ActiveTool.eraser,
-                onTap: onSelectEraser
-            ),
-
-            const SizedBox(height: 8),
-
-            // 4. CÔNG CỤ: CHỌN / DI CHUYỂN (HAND)
-            _buildToolBtn(
-              icon: Icons.pan_tool_alt_rounded,
-              isActive: activeTool == ActiveTool.hand,
-              onTap: onSelectHand
-            ),
-
-            const SizedBox(height: 8),
-
-            // 5. CÔNG CỤ: TEXT
-            _buildToolBtn(
-              icon: Icons.text_fields_rounded,
-              isActive: activeTool == ActiveTool.text,
-              onTap: onSelectText
-            ),
-
-            const SizedBox(height: 16),
-
-            // 6. SLIDERS
-            const Text("Size", style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.black38)),
-            SizedBox(
-              height: 100,
-              child: RotatedBox(
-                  quarterTurns: 3,
-                  child: _ModernSlider(value: currentWidth, min: 1, max: 100, onChanged: onWidthChanged)
-              ),
-            ),
-
-            const SizedBox(height: 8),
-
-            const Text("Opac", style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.black38)),
-            SizedBox(
-              height: 100,
-              child: RotatedBox(
-                  quarterTurns: 3,
-                  child: _ModernSlider(value: currentOpacity, min: 0, max: 1, onChanged: onOpacityChanged)
-              ),
-            ),
-
-            const SizedBox(height: 12),
-            const Divider(indent: 10, endIndent: 10, height: 1),
-            const SizedBox(height: 12),
-
-            // 7. UNDO / REDO
-            _buildTinyBtn(Icons.undo_rounded, onUndo),
-            const SizedBox(height: 8),
-            _buildTinyBtn(Icons.redo_rounded, onRedo),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Widget nút công cụ (Tự động đổi màu khi Active)
-  Widget _buildToolBtn({required IconData icon, required bool isActive, required VoidCallback onTap}) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        width: 36, height: 36,
-        decoration: BoxDecoration(
-          color: isActive ? Colors.black87 : Colors.white, // Đen nếu chọn, Trắng nếu không
-          shape: BoxShape.circle,
-          border: isActive ? null : Border.all(color: Colors.grey.shade200),
-          boxShadow: isActive
-              ? [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 4, offset: const Offset(0, 2))]
-              : [],
-        ),
-        child: Icon(
-          icon,
-          color: isActive ? Colors.white : Colors.black54, // Icon trắng nếu chọn
-          size: 20,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTinyBtn(IconData icon, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.all(6.0),
-        child: Icon(icon, size: 20, color: Colors.black54),
-      ),
-    );
-  }
+  State<DrawingSidebar> createState() => _DrawingSidebarState();
 }
 
-class _ModernSlider extends StatelessWidget {
-  final double value;
-  final double min, max;
-  final ValueChanged<double> onChanged;
-  const _ModernSlider({required this.value, required this.min, required this.max, required this.onChanged});
+class _DrawingSidebarState extends State<DrawingSidebar> {
+  // Dùng để định vị vị trí popup
+  final LayerLink _sizeLink = LayerLink();
+  final LayerLink _opacityLink = LayerLink();
+
+  // Quản lý Overlay (Cửa sổ nổi)
+  OverlayEntry? _overlayEntry;
+  String _activePopup = ''; // 'size', 'opacity' hoặc ''
+
+  // Hàm đóng popup
+  void _closePopup() {
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+    setState(() {
+      _activePopup = '';
+    });
+  }
+
+  // Hàm mở popup slider
+  void _showSliderPopup({
+    required BuildContext context,
+    required LayerLink link,
+    required String type, // 'size' hoặc 'opacity'
+    required double value,
+    required double min,
+    required double max,
+    required Function(double) onChanged,
+  }) {
+    // Nếu đang mở đúng cái này thì đóng lại (Toggle)
+    if (_activePopup == type) {
+      _closePopup();
+      return;
+    }
+
+    // Đóng cái cũ nếu đang mở cái khác
+    _closePopup();
+
+    setState(() {
+      _activePopup = type;
+    });
+
+    // Tạo Overlay mới
+    _overlayEntry = OverlayEntry(
+      builder: (context) {
+        return Positioned(
+          width: 200, // Chiều dài thanh trượt popup
+          height: 48,
+          child: CompositedTransformFollower(
+            link: link,
+            showWhenUnlinked: false,
+            offset: const Offset(55, 0), // Xuất hiện lệch sang phải 55px
+            child: Material(
+              elevation: 4,
+              borderRadius: BorderRadius.circular(24),
+              color: Colors.white,
+              child: Row(
+                children: [
+                  const SizedBox(width: 12),
+                  Text(
+                    type == 'size' ? "Size" : "Opac",
+                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey),
+                  ),
+                  Expanded(
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 4,
+                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                        overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+                      ),
+                      child: StatefulBuilder(
+                          builder: (context, setStateSlider) {
+                            return Slider(
+                              value: type == 'size' ? widget.currentWidth : widget.currentOpacity,
+                              min: min,
+                              max: max,
+                              activeColor: type == 'size' ? Colors.black : Colors.blue,
+                              inactiveColor: Colors.grey[200],
+                              onChanged: (val) {
+                                setStateSlider(() {}); // Cập nhật slider UI
+                                onChanged(val); // Gọi callback ra ngoài
+                              },
+                            );
+                          }
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    // Chèn vào màn hình
+    Overlay.of(context).insert(_overlayEntry!);
+  }
+
+  @override
+  void dispose() {
+    _closePopup(); // Dọn dẹp khi widget bị hủy
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return SliderTheme(
-      data: SliderThemeData(
-        trackHeight: 4,
-        activeTrackColor: Colors.black87,
-        inactiveTrackColor: Colors.grey.shade200,
-        thumbColor: Colors.black,
-        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6, elevation: 2),
-        overlayShape: SliderComponentShape.noOverlay,
+    bool isBrush = widget.activeTool.toString().contains('brush');
+    bool isEraser = widget.activeTool.toString().contains('eraser');
+    bool isHand = widget.activeTool.toString().contains('hand');
+    bool isText = widget.activeTool.toString().contains('text');
+    bool isLasso = widget.activeTool.toString().contains('lasso');
+
+    return Container(
+      width: 50,
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(25),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(2, 2),
+          ),
+        ],
       ),
-      child: Slider(value: value, min: min, max: max, onChanged: onChanged),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 1. MÀU SẮC (Color Picker)
+          GestureDetector(
+            onTap: widget.onColorTap,
+            child: Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: widget.currentColor,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.grey.shade300, width: 2),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+          const Divider(height: 1, indent: 10, endIndent: 10),
+          const SizedBox(height: 8),
+
+          // 2. CÔNG CỤ (Tools)
+          _buildToolIcon(Icons.brush, isBrush, widget.onSelectBrush),
+          _buildToolIcon(Icons.cleaning_services_rounded, isEraser, widget.onSelectEraser),
+          if (widget.onSelectLasso != null)
+            _buildToolIcon(Icons.gesture, isLasso, widget.onSelectLasso!),
+          _buildToolIcon(Icons.pan_tool, isHand, widget.onSelectHand),
+          _buildToolIcon(Icons.text_fields, isText, widget.onSelectText),
+
+          const SizedBox(height: 8),
+          const Divider(height: 1, indent: 10, endIndent: 10),
+          const SizedBox(height: 16),
+
+          // 3. NÚT CHỈNH SIZE (Popup Slider)
+          CompositedTransformTarget(
+            link: _sizeLink,
+            child: IconButton(
+              icon: Icon(
+                Icons.circle, // Icon hình tròn biểu thị size
+                size: 14 + (widget.currentWidth / 5).clamp(0, 14), // Icon to nhỏ theo size thật
+                color: _activePopup == 'size' ? Colors.blue : Colors.black87,
+              ),
+              onPressed: () => _showSliderPopup(
+                context: context,
+                link: _sizeLink,
+                type: 'size',
+                value: widget.currentWidth,
+                min: 1.0,
+                max: 50.0,
+                onChanged: widget.onWidthChanged,
+              ),
+              tooltip: 'Chỉnh kích thước',
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          // 4. NÚT CHỈNH OPACITY (Popup Slider)
+          CompositedTransformTarget(
+            link: _opacityLink,
+            child: IconButton(
+              icon: Icon(
+                Icons.opacity,
+                color: (_activePopup == 'opacity' ? Colors.blue : Colors.black87)
+                    .withOpacity(0.5 + (widget.currentOpacity / 2)), // Icon mờ theo opacity thật
+              ),
+              onPressed: () => _showSliderPopup(
+                context: context,
+                link: _opacityLink,
+                type: 'opacity',
+                value: widget.currentOpacity,
+                min: 0.1,
+                max: 1.0,
+                onChanged: widget.onOpacityChanged,
+              ),
+              tooltip: 'Chỉnh độ mờ',
+            ),
+          ),
+
+          const SizedBox(height: 16),
+          const Divider(height: 1, indent: 10, endIndent: 10),
+          const SizedBox(height: 8),
+
+          // 5. UNDO / REDO
+          IconButton(
+            icon: const Icon(Icons.undo, color: Colors.black54),
+            onPressed: widget.onUndo,
+            tooltip: 'Hoàn tác',
+          ),
+          IconButton(
+            icon: const Icon(Icons.redo, color: Colors.black54),
+            onPressed: widget.onRedo,
+            tooltip: 'Làm lại',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToolIcon(IconData icon, bool isActive, VoidCallback onTap) {
+    return IconButton(
+      icon: Icon(icon),
+      color: isActive ? Colors.blueAccent : Colors.black87,
+      onPressed: onTap,
     );
   }
 }

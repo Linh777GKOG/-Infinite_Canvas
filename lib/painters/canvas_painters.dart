@@ -2,8 +2,10 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../models/drawing_models.dart';
 
+// 1. Enum GridType
 enum GridType { lines, dots, none }
 
+// 2. DrawPainter: Vẽ các nét bút, ảnh và text
 class DrawPainter extends CustomPainter {
   final List<Stroke> strokes;
   final List<ImportedImage> images;
@@ -14,17 +16,18 @@ class DrawPainter extends CustomPainter {
   late final bool _hasEraser;
 
   DrawPainter(
-    this.strokes,
-    this.images, {
-    this.texts = const [],
-    this.canvasColor,
-    this.isPreview = false,
-  }) {
+      this.strokes,
+      this.images, {
+        this.texts = const [],
+        this.canvasColor,
+        this.isPreview = false,
+      }) {
     _hasEraser = !isPreview && strokes.any((s) => s.isEraser);
   }
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Vẽ Ảnh
     for (final img in images) {
       final w = img.image.width * img.scale;
       final h = img.image.height * img.scale;
@@ -50,6 +53,7 @@ class DrawPainter extends CustomPainter {
       ..strokeJoin = StrokeJoin.round
       ..style = PaintingStyle.stroke;
 
+    // Vẽ Nét Bút
     for (final stroke in strokes) {
       paint.strokeWidth = stroke.width;
       if (stroke.isEraser) {
@@ -91,6 +95,7 @@ class DrawPainter extends CustomPainter {
       canvas.restore();
     }
 
+    // Vẽ Text
     for (final t in texts) {
       if (t.text.trim().isEmpty) continue;
       final textPainter = TextPainter(
@@ -137,15 +142,18 @@ class DrawPainter extends CustomPainter {
   bool shouldRepaint(covariant DrawPainter oldDelegate) => true;
 }
 
+// 3. GridPainter: Sửa lỗi Vector3/Offset
 class GridPainter extends CustomPainter {
   final double gridSize;
   final GridType gridType;
-  final Color baseColor;
+  final Color gridColor;
+  final TransformationController? controller;
 
   GridPainter({
     required this.gridSize,
     required this.gridType,
-    required this.baseColor, // Đảm bảo có tham số này
+    required this.gridColor,
+    this.controller,
   });
 
   @override
@@ -153,30 +161,50 @@ class GridPainter extends CustomPainter {
     if (gridType == GridType.none) return;
 
     final majorPaint = Paint()
-      ..color = baseColor.withOpacity(0.25)
-      ..strokeWidth = 1.0;
+      ..color = gridColor.withOpacity(0.25)
+      ..strokeWidth = 1.0
+      ..style = PaintingStyle.stroke;
 
-    final minorPaint = Paint()
-      ..color = baseColor.withOpacity(0.1)
-      ..strokeWidth = 0.5;
+    // --- TỐI ƯU HÓA VIEWPORT ---
+    double startX = 0;
+    double endX = size.width;
+    double startY = 0;
+    double endY = size.height;
+
+    if (controller != null) {
+      final Matrix4 matrix = controller!.value;
+      final double scale = matrix.getMaxScaleOnAxis();
+
+      // 🔥 SỬA LỖI TẠI ĐÂY: Xóa chữ 'Offset' đi, để 'final' tự nhận diện Vector3
+      final translationVector = matrix.getTranslation();
+
+      final double transX = translationVector.x; // Giờ nó sẽ hiểu .x
+      final double transY = translationVector.y; // và .y
+
+      const double viewportW = 3000.0;
+      const double viewportH = 3000.0;
+
+      startX = (-transX / scale).clamp(0.0, size.width);
+      startY = (-transY / scale).clamp(0.0, size.height);
+      endX = ((-transX + viewportW) / scale).clamp(0.0, size.width);
+      endY = ((-transY + viewportH) / scale).clamp(0.0, size.height);
+    }
+
+    startX = (startX / gridSize).floor() * gridSize;
+    startY = (startY / gridSize).floor() * gridSize;
 
     if (gridType == GridType.lines) {
-      for (double x = 0; x <= size.width; x += gridSize / 5) {
-        canvas.drawLine(Offset(x, 0), Offset(x, size.height), minorPaint);
+      for (double x = startX; x <= endX; x += gridSize) {
+        canvas.drawLine(Offset(x, startY), Offset(x, endY), majorPaint);
       }
-      for (double y = 0; y <= size.height; y += gridSize / 5) {
-        canvas.drawLine(Offset(0, y), Offset(size.width, y), minorPaint);
-      }
-      for (double x = 0; x <= size.width; x += gridSize) {
-        canvas.drawLine(Offset(x, 0), Offset(x, size.height), majorPaint);
-      }
-      for (double y = 0; y <= size.height; y += gridSize) {
-        canvas.drawLine(Offset(0, y), Offset(size.width, y), majorPaint);
+      for (double y = startY; y <= endY; y += gridSize) {
+        canvas.drawLine(Offset(startX, y), Offset(endX, y), majorPaint);
       }
     } else if (gridType == GridType.dots) {
-      for (double x = 0; x <= size.width; x += gridSize) {
-        for (double y = 0; y <= size.height; y += gridSize) {
-          canvas.drawCircle(Offset(x, y), 1.2, majorPaint..style = PaintingStyle.fill);
+      final dotPaint = Paint()..color = gridColor.withOpacity(0.25)..style = PaintingStyle.fill;
+      for (double x = startX; x <= endX; x += gridSize) {
+        for (double y = startY; y <= endY; y += gridSize) {
+          canvas.drawCircle(Offset(x, y), 1.5, dotPaint);
         }
       }
     }
@@ -184,12 +212,14 @@ class GridPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant GridPainter oldDelegate) {
-    return oldDelegate.gridType != gridType || 
-           oldDelegate.gridSize != gridSize ||
-           oldDelegate.baseColor != baseColor;
+    return oldDelegate.gridType != gridType ||
+        oldDelegate.gridSize != gridSize ||
+        oldDelegate.gridColor != gridColor ||
+        oldDelegate.controller != controller;
   }
 }
 
+// 4. SelectionPainter
 class SelectionPainter extends CustomPainter {
   final ImportedImage? selectedImage;
   final CanvasText? selectedText;
@@ -248,4 +278,73 @@ class SelectionPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant SelectionPainter oldDelegate) => true;
+}
+
+// 5. LassoSelectionPainter
+class LassoSelectionPainter extends CustomPainter {
+  final List<Offset> lassoPoints;
+  final Set<String> selectedStrokeIds;
+  final List<DrawingLayer> layers;
+  final double scale;
+
+  LassoSelectionPainter({
+    required this.lassoPoints,
+    required this.selectedStrokeIds,
+    required this.layers,
+    required this.scale,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (lassoPoints.isNotEmpty) {
+      final paint = Paint()
+        ..color = Colors.black87
+        ..strokeWidth = 2 / scale
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round;
+
+      final path = Path();
+      path.moveTo(lassoPoints.first.dx, lassoPoints.first.dy);
+      for (int i = 1; i < lassoPoints.length; i++) {
+        path.lineTo(lassoPoints[i].dx, lassoPoints[i].dy);
+      }
+      canvas.drawPath(path, paint);
+    }
+
+    if (selectedStrokeIds.isNotEmpty) {
+      final highlightPaint = Paint()
+        ..color = Colors.blueAccent.withOpacity(0.5)
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
+
+      for (var layer in layers) {
+        if (!layer.isVisible) continue;
+        for (var stroke in layer.strokes) {
+          if (selectedStrokeIds.contains(stroke.id)) {
+            highlightPaint.strokeWidth = stroke.width + (6.0 / scale);
+            if (stroke.points.isNotEmpty) {
+              final path = Path();
+              path.moveTo(stroke.points.first.dx, stroke.points.first.dy);
+              for (int i = 1; i < stroke.points.length; i++) {
+                final p0 = stroke.points[i - 1];
+                final p1 = stroke.points[i];
+                final mid = Offset((p0.dx + p1.dx) / 2, (p0.dy + p1.dy) / 2);
+                if (i == 1) {
+                  path.lineTo(mid.dx, mid.dy);
+                } else {
+                  path.quadraticBezierTo(p0.dx, p0.dy, mid.dx, mid.dy);
+                }
+              }
+              path.lineTo(stroke.points.last.dx, stroke.points.last.dy);
+              canvas.drawPath(path, highlightPaint);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant LassoSelectionPainter oldDelegate) => true;
 }

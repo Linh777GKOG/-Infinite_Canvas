@@ -19,8 +19,11 @@ import '../widgets/procreate_color_picker.dart';
 import '../widgets/drawing_toolbar.dart';
 import '../widgets/drawing_sidebar.dart';
 import '../widgets/drawing_layers_sidebar.dart';
-import '../widgets/text_editor_dialog.dart'; // Widget mới tách ra
+import '../widgets/text_editor_dialog.dart';
 import 'gallery_page.dart';
+
+// 🔥 1. Đảm bảo Enum này có 'lasso' (Nếu file model chưa có thì thêm vào đây hoặc update model)
+// enum ActiveTool { brush, eraser, hand, text, lasso }
 
 class DrawPage extends StatefulWidget {
   final String drawingId;
@@ -46,12 +49,19 @@ class _DrawPageState extends State<DrawPage> {
   final List<CanvasText> texts = [];
   Stroke? currentStroke;
 
+  // --- SELECTION STATE ---
   int? _selectedImageIndex;
   int? _selectedTextIndex;
+
+  // 🔥 2. BIẾN CHO MULTI LASSO
+  List<Offset> lassoPoints = [];
+  Set<String> selectedStrokeIds = {};
+
   bool _isDraggingElement = false;
   Offset? _dragPointerStart;
-  Offset? _dragElementStart;
+  Offset? _dragElementStart; // Dùng cho Single Element (Ảnh/Text)
 
+  // Transform Handles
   TransformHandle _activeHandle = TransformHandle.none;
   double? _transformRotationStart;
   double? _transformScaleStart;
@@ -59,8 +69,8 @@ class _DrawPageState extends State<DrawPage> {
   double? _transformStartAngle;
   double? _transformStartDistance;
 
-  final double gridSize = 60.0; 
-  final Color gridColor = const Color(0xFF32C5FF); 
+  final double gridSize = 60.0;
+  final Color gridColor = const Color(0xFF32C5FF);
   Color canvasColor = Colors.white;
 
   List<Offset> currentPoints = [];
@@ -129,15 +139,47 @@ class _DrawPageState extends State<DrawPage> {
   void _toggleLayerVisibility(int index) => setState(() => layers[index].isVisible = !layers[index].isVisible);
   void _deleteLayer(int index) { if (layers.length <= 1) return; setState(() { layers.removeAt(index); if (activeLayerIndex >= layers.length) activeLayerIndex = layers.length - 1; else if (index < activeLayerIndex) activeLayerIndex--; }); }
 
-  List<Stroke> get _visibleStrokes => layers.where((layer) => layer.isVisible).expand((layer) => layer.strokes).toList();
+  // 🔥 SỬA LỖI: Thêm .cast<Stroke>() trước .toList()
+  List<Stroke> get _visibleStrokes => layers
+      .where((layer) => layer.isVisible)
+      .expand((layer) => layer.strokes)
+      .cast<Stroke>() // <--- QUAN TRỌNG
+      .toList();
 
+  // --- LOGIC CẢM ỨNG (Đã tích hợp Lasso) ---
   void _onPointerDown(PointerDownEvent event) {
     _pointerCount++;
     if (_pointerCount > _maxPointerCount) _maxPointerCount = _pointerCount;
-    if (_pointerCount > 1) { setState(() { _isMultitouching = true; currentStroke = null; currentPoints = []; }); }
-    else {
+
+    if (_pointerCount > 1) {
+      setState(() { _isMultitouching = true; currentStroke = null; currentPoints = []; });
+    } else {
       _hasZoomed = false; _maxPointerCount = 1;
       final scenePos = controller.toScene(event.localPosition);
+
+      // 🔥 LASSO: Bắt đầu vẽ vùng chọn
+      if (activeTool == ActiveTool.lasso) {
+        setState(() {
+          lassoPoints = [scenePos];
+          selectedStrokeIds.clear();
+          _selectedImageIndex = null;
+          _selectedTextIndex = null;
+        });
+        return;
+      }
+
+      // 🔥 LASSO MOVE: Nếu đang chọn Hand và có nét được chọn -> Kéo cả nhóm
+      if (activeTool == ActiveTool.hand && selectedStrokeIds.isNotEmpty) {
+        // Tạm thời cho phép bấm bất cứ đâu để kéo (để dễ dùng)
+        setState(() {
+          _isDraggingElement = true;
+          _dragPointerStart = scenePos;
+          // Lưu ý: Không dùng _dragElementStart cho nhóm nét vẽ
+        });
+        return;
+      }
+
+      // Logic cũ: Xử lý Text/Image/Handles
       if (activeTool == ActiveTool.hand || activeTool == ActiveTool.text) {
         final handles = _currentSelectionHandles();
         if (handles != null) {
@@ -145,19 +187,54 @@ class _DrawPageState extends State<DrawPage> {
           if (handle != TransformHandle.none) { _beginHandleTransform(handle: handle, pointerScene: scenePos); return; }
         }
         final hitText = _hitTestText(scenePos);
-        if (hitText != null) { setState(() { _selectedTextIndex = hitText; _selectedImageIndex = null; }); if (activeTool == ActiveTool.hand) _beginDrag(scenePos, texts[hitText].position); else _promptAddOrEditText(existingIndex: hitText); return; }
+        if (hitText != null) { setState(() { _selectedTextIndex = hitText; _selectedImageIndex = null; selectedStrokeIds.clear(); }); if (activeTool == ActiveTool.hand) _beginDrag(scenePos, texts[hitText].position); else _promptAddOrEditText(existingIndex: hitText); return; }
         final hitImage = _hitTestImage(scenePos);
-        if (hitImage != null) { setState(() { _selectedImageIndex = hitImage; _selectedTextIndex = null; }); _beginDrag(scenePos, images[hitImage].position); return; }
+        if (hitImage != null) { setState(() { _selectedImageIndex = hitImage; _selectedTextIndex = null; selectedStrokeIds.clear(); }); _beginDrag(scenePos, images[hitImage].position); return; }
         if (activeTool == ActiveTool.text) { setState(() { _selectedImageIndex = null; _selectedTextIndex = null; }); _promptAddOrEditText(position: scenePos); return; }
-        setState(() { _selectedImageIndex = null; _selectedTextIndex = null; }); return;
+
+        // Bấm ra ngoài -> Bỏ chọn tất cả
+        setState(() { _selectedImageIndex = null; _selectedTextIndex = null; selectedStrokeIds.clear(); });
+        return;
       }
-      setState(() { _selectedImageIndex = null; _selectedTextIndex = null; });
+
+      // Logic cũ: Vẽ Brush/Eraser
+      setState(() { _selectedImageIndex = null; _selectedTextIndex = null; selectedStrokeIds.clear(); });
       if (layers[activeLayerIndex].isVisible) startStroke(scenePos);
     }
   }
 
   void _onPointerMove(PointerMoveEvent event) {
     final scenePos = controller.toScene(event.localPosition);
+
+    // 🔥 LASSO: Vẽ thêm điểm
+    if (activeTool == ActiveTool.lasso && lassoPoints.isNotEmpty) {
+      setState(() => lassoPoints.add(scenePos));
+      return;
+    }
+
+    // 🔥 LASSO MOVE: Di chuyển nhóm nét vẽ
+    if (_isDraggingElement && selectedStrokeIds.isNotEmpty && activeTool == ActiveTool.hand && !_isMultitouching) {
+      final startPointer = _dragPointerStart;
+      if (startPointer == null) return;
+      final delta = scenePos - startPointer;
+
+      setState(() {
+        for (var layer in layers) {
+          if (!layer.isVisible) continue;
+          for (var stroke in layer.strokes) {
+            // Cần đảm bảo Stroke có ID. Nếu chưa có, logic này sẽ không chạy đúng.
+            // Giả sử Stroke model đã có id.
+            if (selectedStrokeIds.contains(stroke.id)) {
+              stroke.points = stroke.points.map((p) => p + delta).toList();
+            }
+          }
+        }
+        _dragPointerStart = scenePos; // Reset mốc để cộng dồn chính xác
+      });
+      return;
+    }
+
+    // Logic cũ
     if (_activeHandle != TransformHandle.none && !_isMultitouching && _pointerCount == 1) { _updateHandleTransform(pointerScene: scenePos); return; }
     if (_isDraggingElement && !_isMultitouching && _pointerCount == 1) { _updateDrag(scenePos); return; }
     if (!_isMultitouching && _pointerCount == 1 && (activeTool == ActiveTool.brush || activeTool == ActiveTool.eraser)) addPoint(scenePos);
@@ -166,6 +243,34 @@ class _DrawPageState extends State<DrawPage> {
   void _onPointerUp(PointerUpEvent event) {
     _pointerCount--;
     if (_pointerCount == 0) {
+
+      // 🔥 LASSO: Kết thúc vẽ -> Tìm nét trong vùng chọn
+      if (activeTool == ActiveTool.lasso && lassoPoints.isNotEmpty) {
+        lassoPoints.add(lassoPoints.first); // Đóng vòng
+        final foundIds = <String>{};
+
+        for (var layer in layers) {
+          if (!layer.isVisible) continue;
+          for (var stroke in layer.strokes) {
+            if (PolygonUtils.isStrokeInLasso(stroke, lassoPoints)) {
+              foundIds.add(stroke.id);
+            }
+          }
+        }
+
+        setState(() {
+          selectedStrokeIds = foundIds;
+          lassoPoints.clear();
+          if (foundIds.isNotEmpty) {
+            activeTool = ActiveTool.hand; // Tự chuyển sang Hand để kéo
+            _showToast("Selected ${foundIds.length} strokes");
+          } else {
+            _showToast("No strokes selected");
+          }
+        });
+        return;
+      }
+
       if (_activeHandle != TransformHandle.none) _endHandleTransform();
       else if (_isDraggingElement) _endDrag();
       else if (activeTool == ActiveTool.brush || activeTool == ActiveTool.eraser) {
@@ -179,6 +284,7 @@ class _DrawPageState extends State<DrawPage> {
 
   void _onPointerCancel(PointerCancelEvent event) { _pointerCount = 0; setState(() { _isMultitouching = false; currentStroke = null; _endHandleTransform(); _endDrag(); }); }
 
+  // --- TRANSFORM & DRAG LOGIC (Single Element) ---
   void _beginHandleTransform({required TransformHandle handle, required Offset pointerScene}) {
     final handles = _currentSelectionHandles(); if (handles == null) return;
     setState(() { _activeHandle = handle; _transformElementCenter = handles.center; });
@@ -227,10 +333,10 @@ class _DrawPageState extends State<DrawPage> {
   Future<void> _promptAddOrEditText({Offset? position, int? existingIndex}) async {
     final isEdit = existingIndex != null;
     final initial = isEdit ? texts[existingIndex] : CanvasText(id: _uuid.v4(), text: '', position: position ?? Offset.zero, color: currentColor, fontSize: 36);
-    
+
     final result = await showDialog<bool>(
-      context: context, 
-      builder: (ctx) => TextEditorDialog(initialText: initial, isEdit: isEdit)
+        context: context,
+        builder: (ctx) => TextEditorDialog(initialText: initial, isEdit: isEdit)
     );
 
     if (result == true && initial.text.trim().isNotEmpty) {
@@ -256,6 +362,8 @@ class _DrawPageState extends State<DrawPage> {
     return WillPopScope(
       onWillPop: () async { return true; },
       child: Scaffold(
+        resizeToAvoidBottomInset: false,
+
         backgroundColor: const Color(0xFFF5F5F7),
         body: Stack(
           children: [
@@ -269,18 +377,28 @@ class _DrawPageState extends State<DrawPage> {
                     width: canvasWidth, height: canvasHeight,
                     child: Stack(
                       children: [
-                        // Đã tối ưu: Loại bỏ RepaintBoundary ở lớp lưới để tránh tràn bộ nhớ
                         SizedBox(
                           width: canvasWidth, height: canvasHeight,
                           child: Stack(
                             children: [
                               Positioned.fill(child: Container(color: canvasColor, key: ValueKey("bg_$canvasColor"))),
-                              Positioned.fill(child: CustomPaint(key: ValueKey("grid_$currentGridType"), painter: GridPainter(gridSize: gridSize, gridType: currentGridType, baseColor: gridColor))),
+                              Positioned.fill(child: CustomPaint(key: ValueKey("grid_$currentGridType"), painter: GridPainter(gridSize: gridSize, gridType: currentGridType, gridColor: gridColor, controller: controller))),
                             ],
                           ),
                         ),
                         RepaintBoundary(child: CustomPaint(isComplex: true, foregroundPainter: DrawPainter(_visibleStrokes, images, texts: texts))),
                         RepaintBoundary(child: CustomPaint(foregroundPainter: DrawPainter(currentStroke == null ? [] : [currentStroke!], [], canvasColor: canvasColor, isPreview: true))),
+
+                        // 🔥 3. THÊM LASSO PAINTER VÀO ĐÂY
+                        CustomPaint(
+                          foregroundPainter: LassoSelectionPainter(
+                            lassoPoints: lassoPoints,
+                            selectedStrokeIds: selectedStrokeIds,
+                            layers: layers,
+                            scale: currentScale,
+                          ),
+                        ),
+
                         IgnorePointer(child: CustomPaint(foregroundPainter: SelectionPainter(selectedImage: _selectedImageIndex == null ? null : images[_selectedImageIndex!], selectedText: _selectedTextIndex == null ? null : texts[_selectedTextIndex!], viewportScale: currentScale))),
                       ],
                     ),
@@ -288,9 +406,31 @@ class _DrawPageState extends State<DrawPage> {
                 ),
               ),
             ),
+
             Positioned(top: 0, left: 0, right: 0, child: DrawingToolbar(onBack: () => Navigator.pop(context), onSave: () {}, onSettingsSelect: () => DrawingSettingsModal.show(context, currentGridType: currentGridType, onGridTypeChanged: (t) => setState(() => currentGridType = t), onPickBgColor: () => showDialog(context: context, builder: (ctx) => ProcreateColorPicker(currentColor: canvasColor, onColorChanged: (c) => setState(() => canvasColor = c)))), onAddImage: _pickAndInsertImage, onAddText: () => setState(() => activeTool = ActiveTool.text), zoomLevel: "${(currentScale * 100).round()}%", drawingName: currentName, onRename: () {})),
-            Positioned(left: 4, top: 100, bottom: 80, child: Center(child: DrawingSidebar(currentWidth: currentWidth, currentOpacity: currentOpacity, currentColor: currentColor, onWidthChanged: (v) => setState(() => currentWidth = v), onOpacityChanged: (v) => setState(() => currentOpacity = v), onUndo: undo, onRedo: redo, onColorTap: () => showDialog(context: context, builder: (ctx) => ProcreateColorPicker(currentColor: currentColor, onColorChanged: (c) => setState(() => currentColor = c))), activeTool: activeTool, onSelectBrush: () => setState(() => activeTool = ActiveTool.brush), onSelectEraser: () => setState(() => activeTool = ActiveTool.eraser), onSelectHand: () => setState(() => activeTool = ActiveTool.hand), onSelectText: () => setState(() => activeTool = ActiveTool.text)))),
+
+            Positioned(left: 4, top: 100, bottom: 80, child: Center(
+                child: DrawingSidebar(
+                  currentWidth: currentWidth,
+                  currentOpacity: currentOpacity,
+                  currentColor: currentColor,
+                  onWidthChanged: (v) => setState(() => currentWidth = v),
+                  onOpacityChanged: (v) => setState(() => currentOpacity = v),
+                  onUndo: undo,
+                  onRedo: redo,
+                  onColorTap: () => showDialog(context: context, builder: (ctx) => ProcreateColorPicker(currentColor: currentColor, onColorChanged: (c) => setState(() => currentColor = c))),
+                  activeTool: activeTool,
+                  onSelectBrush: () => setState(() => activeTool = ActiveTool.brush),
+                  onSelectEraser: () => setState(() => activeTool = ActiveTool.eraser),
+                  onSelectHand: () => setState(() => activeTool = ActiveTool.hand),
+                  onSelectText: () => setState(() => activeTool = ActiveTool.text),
+                  // 🔥 4. THÊM SỰ KIỆN CHỌN LASSO (Bạn cần thêm prop này vào DrawingSidebar nhé)
+                  onSelectLasso: () => setState(() => activeTool = ActiveTool.lasso),
+                )
+            )),
+
             Positioned(right: 0, top: 60, child: DrawingLayersSidebar(layers: layers, activeLayerIndex: activeLayerIndex, onNewLayer: _addNewLayer, onSelectLayer: _selectLayer, onToggleVisibility: _toggleLayerVisibility, onDeleteLayer: _deleteLayer)),
+
             if (_selectedImageIndex != null || _selectedTextIndex != null) Positioned(left: 0, right: 0, bottom: 30, child: Center(child: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 14)]), child: Row(mainAxisSize: MainAxisSize.min, children: [IconButton(icon: const Icon(Icons.delete_outline, color: Colors.redAccent), onPressed: _deleteSelectedElement), const VerticalDivider(width: 16), IconButton(icon: const Icon(Icons.zoom_out_map), onPressed: () => {}), IconButton(icon: const Icon(Icons.rotate_right), onPressed: () => {})])))),
             if (isSaving || isInitialLoading) Container(color: Colors.black26, child: const Center(child: CircularProgressIndicator(color: Colors.black))),
           ],
@@ -298,4 +438,87 @@ class _DrawPageState extends State<DrawPage> {
       ),
     );
   }
+}
+
+// 🔥 5. UTILS CHO LASSO
+class PolygonUtils {
+  static bool isPointInPolygon(Offset point, List<Offset> polygon) {
+    if (polygon.length < 3) return false;
+    bool inside = false;
+    for (int i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      if (((polygon[i].dy > point.dy) != (polygon[j].dy > point.dy)) &&
+          (point.dx < (polygon[j].dx - polygon[i].dx) * (point.dy - polygon[i].dy) /
+              (polygon[j].dy - polygon[i].dy) + polygon[i].dx)) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  static bool isStrokeInLasso(Stroke stroke, List<Offset> lassoPolygon) {
+    if (stroke.points.isEmpty) return false;
+    int step = (stroke.points.length / 5).ceil().clamp(1, 100);
+    for (int i = 0; i < stroke.points.length; i += step) {
+      if (isPointInPolygon(stroke.points[i], lassoPolygon)) return true;
+    }
+    return false;
+  }
+}
+
+// 🔥 6. PAINTER CHO LASSO & HIGHLIGHT
+class LassoSelectionPainter extends CustomPainter {
+  final List<Offset> lassoPoints;
+  final Set<String> selectedStrokeIds;
+  final List<DrawingLayer> layers;
+  final double scale;
+
+  LassoSelectionPainter({
+    required this.lassoPoints,
+    required this.selectedStrokeIds,
+    required this.layers,
+    required this.scale,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (lassoPoints.isNotEmpty) {
+      final paint = Paint()
+        ..color = Colors.black87
+        ..strokeWidth = 2 / scale
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round;
+
+      final path = Path()..addPolygon(lassoPoints, false);
+      canvas.drawPath(path, paint);
+      canvas.drawPath(path, Paint()..color = Colors.blue.withOpacity(0.1)..style = PaintingStyle.fill);
+    }
+
+    if (selectedStrokeIds.isNotEmpty) {
+      final highlightPaint = Paint()
+        ..color = Colors.blueAccent.withOpacity(0.6)
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
+
+      for (var layer in layers) {
+        if (!layer.isVisible) continue;
+        for (var stroke in layer.strokes) {
+          if (selectedStrokeIds.contains(stroke.id)) {
+            highlightPaint.strokeWidth = stroke.width + (6.0 / scale);
+            if (stroke.points.isNotEmpty) {
+              final path = Path();
+              path.moveTo(stroke.points.first.dx, stroke.points.first.dy);
+              for (int i = 1; i < stroke.points.length; i++) {
+                path.lineTo(stroke.points[i].dx, stroke.points[i].dy);
+              }
+              canvas.drawPath(path, highlightPaint);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant LassoSelectionPainter old) => true;
 }
